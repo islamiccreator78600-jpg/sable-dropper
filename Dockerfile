@@ -10,12 +10,12 @@ RUN apt-get update && apt-get install -y \
     wget unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Apktool install kar
-RUN wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar -O /usr/local/bin/apktool.jar \
+# Apktool ko latest version (2.10.0) se update kar
+RUN wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar -O /usr/local/bin/apktool.jar \
     && printf '#!/bin/sh\nexec java -jar /usr/local/bin/apktool.jar "$@"\n' > /usr/local/bin/apktool \
     && chmod +x /usr/local/bin/apktool
 
-# Android build-tools install kar
+# Android build-tools
 RUN wget -q https://dl.google.com/android/repository/build-tools_r34-linux.zip \
     && unzip -q build-tools_r34-linux.zip -d /opt/android \
     && cp /opt/android/android-14/zipalign /usr/local/bin/ \
