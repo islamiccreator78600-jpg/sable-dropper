@@ -1,3 +1,5 @@
+ARG CACHEBUST=1
+RUN echo "Cache bust: $CACHEBUST"
 # Python ka base image (Debian Bookworm)
 FROM python:3.11-slim-bookworm
 
