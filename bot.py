@@ -11,21 +11,15 @@ from telegram.ext import (
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-RENDER_URL = os.environ.get("RENDER_URL")
+# DHYAN DE: RENDER_URL ke aakhir me koi slash '/' nahi hona chahiye
+RENDER_URL = os.environ.get("RENDER_URL", "").rstrip("/")
 
-# States
 WAITING_APK, WAITING_ICON, WAITING_NAME = range(3)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("🚀 Build APK", callback_data="build_apk")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    text = (
-        "🔥 **Welcome to Dropper Builder** 🔥\n\n"
-        "Main ek advanced APK builder hoon. Mujhe apna APK bhej, "
-        "main usme changes karke tujhe wapas dunga.\n\n"
-        "Shuru karne ke liye neeche button dabayein:"
-    )
+    text = "🔥 **Welcome to Dropper Builder** 🔥\n\nShuru karne ke liye neeche button dabayein:"
     
     if update.message:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
@@ -47,8 +41,7 @@ async def receive_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['apk_file_id'] = doc.file_id
     await update.message.reply_text(
         f"✅ **APK received** ({round(doc.file_size/1024/1024, 2)} MB)\n\n"
-        f"🖼️ **Step 2/3: Optional — Icon**\n\n"
-        f"Kripya ek PNG image bhejein app ke icon ke liye, ya `/skip` type karein.", 
+        f"🖼️ **Step 2/3: Optional — Icon**\n\nKripya ek PNG image bhejein, ya `/skip` type karein.", 
         parse_mode='Markdown'
     )
     return WAITING_ICON
@@ -56,26 +49,16 @@ async def receive_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receive_icon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text and update.message.text.lower() == "/skip":
         context.user_data['icon_file_id'] = None
-        await update.message.reply_text(
-            "⏭️ Icon skip kiya gaya.\n\n"
-            "📝 **Step 3/3: Optional — App Name**\n\n"
-            "App ka naya visible naam bhejein, ya `/skip` type karein.",
-            parse_mode='Markdown'
-        )
+        await update.message.reply_text("⏭️ Icon skip kiya.\n\n📝 **Step 3/3: App Name**\n\nApp ka naya naam bhejein, ya `/skip` type karein.", parse_mode='Markdown')
         return WAITING_NAME
 
     doc = update.message.document
     if not doc or not doc.mime_type == "image/png":
-        await update.message.reply_text("❌ Kripya sirf PNG image bhejein (as a document).")
+        await update.message.reply_text("❌ Kripya sirf PNG image bhejein.")
         return WAITING_ICON
 
     context.user_data['icon_file_id'] = doc.file_id
-    await update.message.reply_text(
-        "✅ **Icon saved**\n\n"
-        "📝 **Step 3/3: Optional — App Name**\n\n"
-        "App ka naya visible naam bhejein, ya `/skip` type karein.",
-        parse_mode='Markdown'
-    )
+    await update.message.reply_text("✅ **Icon saved**\n\n📝 **Step 3/3: App Name**\n\nApp ka naya naam bhejein, ya `/skip` type karein.", parse_mode='Markdown')
     return WAITING_NAME
 
 async def receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -86,13 +69,11 @@ async def receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = await update.message.reply_text("⏳ **Processing...**\nBuild shuru ho raha hai.", parse_mode='Markdown')
     
-    # Fake progress bar animation
     for percent in [20, 45, 70, 90]:
         await asyncio.sleep(1)
         await msg.edit_text(f"⏳ **Processing...**\n[{'■' * (percent//10)}{'□' * (10 - percent//10)}] {percent}%", parse_mode='Markdown')
 
     try:
-        # Get file paths from Telegram
         apk_file = await context.bot.get_file(context.user_data['apk_file_id'])
         apk_url = apk_file.file_path
         
@@ -102,6 +83,8 @@ async def receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             icon_url = icon_file.file_path
 
         app_name = context.user_data.get('app_name')
+        
+        # Yahan URL check kiya ja raha hai
         server_endpoint = f"{RENDER_URL}/build"
 
         response = requests.post(server_endpoint, json={
@@ -112,7 +95,6 @@ async def receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if response.status_code == 200:
             await msg.edit_text("✅ **Build complete!**\nUploading your APK...", parse_mode='Markdown')
-            
             await update.message.reply_document(
                 document=response.content,
                 filename="Built_App.apk",
@@ -124,36 +106,26 @@ async def receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 error_msg = response.json().get("error", "Unknown error")
             except:
                 error_msg = response.text
-            await msg.edit_text(f"❌ **Build Failed:**\n`{error_msg[:200]}`", parse_mode='Markdown')
+            await msg.edit_text(f"❌ **Build Failed:**\n`{error_msg[:150]}`", parse_mode='Markdown')
 
     except Exception as e:
         await msg.edit_text(f"❌ **Error:**\n`{str(e)}`", parse_mode='Markdown')
 
     return ConversationHandler.END
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ Process cancel kar diya gaya.")
-    return ConversationHandler.END
-
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(build_start, pattern="^build_apk$")],
         states={
             WAITING_APK: [MessageHandler(filters.Document.ALL, receive_apk)],
-            WAITING_ICON: [
-                MessageHandler(filters.Document.IMAGE, receive_icon),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_icon) # For /skip
-            ],
+            WAITING_ICON: [MessageHandler(filters.Document.IMAGE, receive_icon), MessageHandler(filters.TEXT & ~filters.COMMAND, receive_icon)],
             WAITING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_name)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
     )
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv_handler)
-    
     print("Bot is running...")
     app.run_polling()
 
