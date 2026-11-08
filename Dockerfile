@@ -1,7 +1,8 @@
+FROM python:3.11-slim-bookworm
+
+# Cache buster
 ARG CACHEBUST=1
 RUN echo "Cache bust: $CACHEBUST"
-
-FROM python:3.11-slim-bookworm
 
 # Java aur zaroori tools install kar
 RUN apt-get update && apt-get install -y \
