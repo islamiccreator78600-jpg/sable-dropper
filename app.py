@@ -11,10 +11,6 @@ app = Flask(__name__)
 WORK = tempfile.mkdtemp()
 KEYSTORE = "keystore.jks"
 
-@app.errorhandler(500)
-def internal_error(exception):
-    return jsonify({"error": f"Internal Server Error: {str(exception)}"}), 500
-
 @app.route("/")
 def home():
     return "Sable APK Builder Alive"
@@ -42,7 +38,7 @@ def build():
         if not zipfile.is_zipfile(target_apk):
             return jsonify({"error": "Invalid APK file"}), 400
 
-        # 2. Decompile APK (Without -r so we can replace resources/icon)
+        # 2. Decompile APK
         shutil.rmtree(target_dir, ignore_errors=True)
         subprocess.run(f"apktool d -f -o {target_dir} {target_apk}", shell=True, capture_output=True, text=True)
 
@@ -50,19 +46,16 @@ def build():
         if not os.path.exists(manifest_path):
             return jsonify({"error": "APK highly protected/packed. Cannot modify."}), 500
 
-        # 3. Change App Name (Manifest)
+        # 3. Change App Name
         if app_name:
             with open(manifest_path, 'r', encoding='utf-8', errors='ignore') as f:
                 t = f.read()
-            
             import re
-            # Replace android:label="..." with new name
             t = re.sub(r'android:label="[^"]*"', f'android:label="{app_name}"', t)
-            
             with open(manifest_path, 'w', encoding='utf-8') as f:
                 f.write(t)
 
-        # 4. Change Icon (If provided)
+        # 4. Change Icon
         if icon_url:
             icon_path = os.path.join(WORK, "new_icon.png")
             res = requests.get(icon_url, stream=True, timeout=60)
@@ -70,11 +63,9 @@ def build():
                 for chunk in res.iter_content(chunk_size=8192):
                     f.write(chunk)
 
-            # Find mipmap folders and replace ic_launcher
             for root, dirs, files in os.walk(os.path.join(target_dir, "res")):
                 for d in dirs:
                     if d.startswith("mipmap"):
-                        # Overwrite ic_launcher.png / .webp
                         for ext in ['.png', '.webp']:
                             icon_dest = os.path.join(root, d, f"ic_launcher{ext}")
                             if os.path.exists(icon_dest):
